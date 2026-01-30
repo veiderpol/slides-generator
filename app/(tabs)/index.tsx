@@ -7,14 +7,13 @@ export default function Dashboard() {
   return (
     <GlassScreen>
       <Text style={styles.h1}>Slides Generator</Text>
-      <Text style={styles.sub}>Liquid glass UI</Text>
 
       <View style={{ gap: 12, marginTop: 12 }}>
         <GlassCard>
           <Text style={styles.cardTitle}>Quick actions</Text>
           <View style={{ flexDirection: "row", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
             <GlassButton label="Sessions" onPress={() => router.push("/sessions")} />
-            <GlassButton label="Start" onPress={() => router.push("/context/step-1")} />
+            <GlassButton label="Start" onPress={() => router.push("/context/index")} />
           </View>
         </GlassCard>
       </View>

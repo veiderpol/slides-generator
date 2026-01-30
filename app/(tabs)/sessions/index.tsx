@@ -1,12 +1,13 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, Alert } from "react-native";
+import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, Alert, Platform } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { v4 as uuidv4 } from "uuid";
 import "react-native-get-random-values";
 
 import { SectionCard, SearchBar} from "@/src/components";
 import { useActiveSession } from "@/src/session";
-import { createSession, deleteSession, listSessions, updateSession, type SessionRecord } from "@/src/storage";
+import { createSession, deleteSession, listSessions, updateSession, type SessionRecord } from "@/src/storage/";
+import { makeEmptyTemplate } from "@/src/session/template";
 
 export default function SessionsScreen() {
   const { loadSession } = useActiveSession();
@@ -16,8 +17,9 @@ export default function SessionsScreen() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
 
-  const refresh = useCallback(() => {
-    setRows(listSessions());
+  const refresh = useCallback(async () => {
+    const data = await listSessions();
+    setRows(data);
   }, []);
 
   useFocusEffect(
@@ -32,16 +34,23 @@ export default function SessionsScreen() {
     return rows.filter((r) => (r.name + " " + r.status + " " + r.id).toLowerCase().includes(s));
   }, [q, rows]);
 
-  const onNewSession = () => {
+  const onNewSession = async () => {
     const id = uuidv4();
-    createSession({ id, name: "Untitled session", startRoute: "/context/step-1" });
-    loadSession(id);
-    refresh();
-    router.push("/context/step-1");
+
+    await createSession({
+      id,
+      name: "Untitled session",
+      startRoute: "/context",
+      answers: makeEmptyTemplate(),
+    });
+
+    await loadSession(id);
+    await refresh();
+    router.push("/context");
   };
 
-  const onResume = (sess: SessionRecord) => {
-    loadSession(sess.id);
+  const onResume = async (sess: SessionRecord) => {
+    await loadSession(sess.id);
     router.push(sess.currentRoute as any);
   };
 
@@ -50,24 +59,36 @@ export default function SessionsScreen() {
     setRenameValue(sess.name);
   };
 
-  const onCommitRename = () => {
+  const onCommitRename = async () => {
     if (!renamingId) return;
     const name = renameValue.trim() || "Untitled session";
-    updateSession(renamingId, { name });
+    await updateSession(renamingId, { name });
     setRenamingId(null);
     setRenameValue("");
-    refresh();
+    await refresh();
   };
 
   const onDelete = (sess: SessionRecord) => {
-    Alert.alert("Delete session?", `"${sess.name}" will be removed.`, [
+    const message = `"${sess.name}" will be removed.`;
+
+    if (Platform.OS === "web") {
+      const ok = window.confirm(`Delete session?\n\n${message}`);
+      if (!ok) return;
+      void (async () => {
+        await deleteSession(sess.id);
+        await refresh();
+      })();
+      return;
+    }
+
+    Alert.alert("Delete session?", message, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
         style: "destructive",
-        onPress: () => {
-          deleteSession(sess.id);
-          refresh();
+        onPress: async () => {
+          await deleteSession(sess.id);
+          await refresh();
         },
       },
     ]);

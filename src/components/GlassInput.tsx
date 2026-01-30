@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, Text, TextInput, View } from "react-native";
+import { StyleSheet, Text, TextInput, View, type ViewStyle, type TextStyle } from "react-native";
 import { theme } from "./theme";
 
 export function GlassInput({
@@ -8,23 +8,27 @@ export function GlassInput({
   onChange,
   placeholder,
   multiline,
+  style,
+  inputStyle,
 }: {
   label?: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   multiline?: boolean;
+  style?: ViewStyle;
+  inputStyle?: TextStyle;
 }) {
   return (
     <View style={{ gap: 8 }}>
       {label ? <Text style={styles.label}>{label}</Text> : null}
-      <View style={styles.wrap}>
+      <View style={[styles.wrap, style]}>
         <TextInput
           value={value}
           onChangeText={onChange}
           placeholder={placeholder}
           placeholderTextColor={theme.text.muted}
-          style={[styles.input, multiline && styles.multiline]}
+          style={[styles.input, multiline && styles.multiline, inputStyle]}
           multiline={multiline}
         />
       </View>

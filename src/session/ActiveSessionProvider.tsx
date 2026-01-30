@@ -1,44 +1,117 @@
-import React, { createContext, useContext, useMemo, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { SessionRecord } from "@/src/storage/sessionsRepo";
-import { getSession, updateSession } from "@/src//storage/sessionsRepo";
+import { getSession, updateSession } from "@/src/storage/sessionsRepo";
+import { initDb } from "@/src/storage/db";
+import { makeEmptyTemplate } from "@/src/session/template";
 
 export type Ctx = {
   session: SessionRecord | null;
-  loadSession: (id: string) => void;
-  setAnswer: (key: string, value: any) => void;
-  setCurrentRoute: (route: string) => void;
-  renameSession: (name: string) => void;
+  dbReady: boolean;
+  loadSession: (id: string) => Promise<void>;
+  setAnswer: (key: string, value: any) => Promise<void>;
+  setCurrentRoute: (route: string) => Promise<void>;
+  renameSession: (name: string) => Promise<void>;
 };
 
 export const ActiveSessionContext = createContext<Ctx | null>(null);
+function setDeep(obj: any, path: string, value: any) {
+  const parts = path.split(".");
+  const root = { ...(obj ?? {}) };
+  let cur = root;
+
+  for (let i = 0; i < parts.length; i++) {
+    const k = parts[i];
+
+    if (i === parts.length - 1) {
+      cur[k] = value;
+    } else {
+      const next = cur[k];
+      cur[k] = typeof next === "object" && next !== null && !Array.isArray(next) ? { ...next } : {};
+      cur = cur[k];
+    }
+  }
+
+  return root;
+}
 
 export function ActiveSessionProvider({ children }: { children: React.ReactNode }) {
+  const [dbReady, setDbReady] = useState(false);
   const [session, setSession] = useState<SessionRecord | null>(null);
+
+  // Initialize DB once (web async-safe)
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        await initDb();
+        if (mounted) setDbReady(true);
+      } catch (e) {
+        console.error("initDb failed:", e);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const ctx = useMemo<Ctx>(() => ({
     session,
-    loadSession: (id) => {
-      const s = getSession(id);
-      setSession(s);
+    dbReady,
+
+    loadSession: async (id) => {
+      if (!dbReady) return;
+      const s = await getSession(id);
+
+      if (!s) {
+        setSession(null);
+        return;
+      }
+
+      // If answers missing, just initialize to template (no migration of old keys)
+      const nextAnswers = s.answers ?? makeEmptyTemplate();
+      setSession({ ...s, answers: nextAnswers });
     },
-    setAnswer: (key, value) => {
-      if (!session) return;
-      const nextAnswers = { ...session.answers, [key]: value };
+
+
+    setAnswer: async (key, value) => {
+      if (!dbReady || !session) return;
+
+      const nextAnswers = setDeep(session.answers, key, value);
       const next = { ...session, answers: nextAnswers };
+
       setSession(next);
-      updateSession(session.id, { answers: nextAnswers });
+
+      try {
+        await updateSession(session.id, { answers: nextAnswers });
+      } catch (e) {
+        console.error("updateSession(setAnswer) failed:", e);
+      }
     },
-    setCurrentRoute: (route) => {
-      if (!session) return;
+    setCurrentRoute: async (route) => {
+      if (!dbReady || !session) return;
+
       setSession({ ...session, currentRoute: route });
-      updateSession(session.id, { currentRoute: route });
+
+      try {
+        await updateSession(session.id, { currentRoute: route });
+      } catch (e) {
+        console.error("updateSession(setCurrentRoute) failed:", e);
+      }
     },
-    renameSession: (name) => {
-      if (!session) return;
+
+    renameSession: async (name) => {
+      if (!dbReady || !session) return;
+
       setSession({ ...session, name });
-      updateSession(session.id, { name });
+
+      try {
+        await updateSession(session.id, { name });
+      } catch (e) {
+        console.error("updateSession(renameSession) failed:", e);
+      }
     },
-  }), [session]);
+  }), [session, dbReady]);
 
   return <ActiveSessionContext.Provider value={ctx}>{children}</ActiveSessionContext.Provider>;
 }
