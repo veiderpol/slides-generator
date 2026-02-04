@@ -35,22 +35,17 @@ const schemaFor = (n) => ({
     },
 });
 
-function json(data, status = 200, extraHeaders = {}) {
+function json(data, status = 200, headers = {}) {
     return new Response(JSON.stringify(data), {
         status,
-        headers: {
-            "Content-Type": "application/json",
-            ...extraHeaders,
-        },
+        headers: { "Content-Type": "application/json", ...headers },
     });
 }
 
-// Pages Function entrypoint
 export async function onRequest(context) {
     const { request, env } = context;
 
-    // (Optional) If you ever call from a different domain, keep CORS.
-    // If your frontend calls same-domain (/api/...), you can remove this.
+    // You can remove CORS entirely if your frontend calls same-domain (/api/...)
     const origin = request.headers.get("Origin") || "*";
     const corsHeaders = {
         "Access-Control-Allow-Origin": origin,
@@ -67,6 +62,14 @@ export async function onRequest(context) {
     }
 
     try {
+        if (!env.OPENAI_API_KEY) {
+            return json(
+                { ok: false, error: "Missing OPENAI_API_KEY env var" },
+                500,
+                corsHeaders
+            );
+        }
+
         const sessionJson = await request.json();
         const answers = sessionJson?.answers ?? {};
 
@@ -76,22 +79,13 @@ export async function onRequest(context) {
                 ? countRaw
                 : parseInt(
                 countRaw?.value === "Otro"
-                    ? (countRaw?.other ?? "6")
-                    : (countRaw?.value ?? "6"),
+                    ? countRaw?.other ?? "6"
+                    : countRaw?.value ?? "6",
                 10
             ) || 6;
 
         const imagesPerIdea = !!answers?.control?.images_per_idea;
 
-        if (!env.OPENAI_API_KEY) {
-            return json(
-                { ok: false, error: "Missing OPENAI_API_KEY env var" },
-                500,
-                corsHeaders
-            );
-        }
-
-        // Call OpenAI Responses API directly (Worker/Pages compatible)
         const r = await fetch("https://api.openai.com/v1/responses", {
             method: "POST",
             headers: {
@@ -111,7 +105,10 @@ export async function onRequest(context) {
                         content: JSON.stringify(
                             {
                                 brief: answers,
-                                request: { ideas_count: ideasCount, images_per_idea: imagesPerIdea },
+                                request: {
+                                    ideas_count: ideasCount,
+                                    images_per_idea: imagesPerIdea,
+                                },
                             },
                             null,
                             2
@@ -139,17 +136,37 @@ export async function onRequest(context) {
         }
 
         const response = await r.json();
-        const raw = response?.output_text;
-        if (!raw) throw new Error("No output_text returned from OpenAI.");
+
+        // ✅ Robust extraction: output_text OR output[].content[].text
+        const raw =
+            response.output_text ||
+            (Array.isArray(response.output)
+                ? response.output
+                    .flatMap((o) => (o.content || []).map((c) => c.text).filter(Boolean))
+                    .join("")
+                : "");
+
+        if (!raw) {
+            return json(
+                { ok: false, error: "No text returned from OpenAI." },
+                500,
+                corsHeaders
+            );
+        }
 
         const parsed = JSON.parse(raw);
 
         return json(
-            { ok: true, ideas_json: raw, ideas: parsed },
+            {
+                ok: true,
+                ideas_json: raw,
+                ideas: parsed,
+            },
             200,
             corsHeaders
         );
     } catch (err) {
+        console.error(err);
         return json(
             { ok: false, error: String(err?.message ?? err) },
             500,
